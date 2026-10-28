@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小安 soc-agent · 文档总览</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <a class="brand" href="index.html">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#1e6fd9"/><stop offset="1" stop-color="#14a38b"/>
+          </linearGradient>
+        </defs>
+        <rect width="34" height="34" rx="8" fill="url(#bg1)"/>
+        <path d="M17 7 L25 11 V18 C25 23 21 26 17 27.5 C13 26 9 23 9 18 V11 Z" fill="#fff"/>
+        <path d="M12 17.5 h2.4 l1.5-3.2 2.2 6.2 1.5-3 h2.4" stroke="#1e6fd9" stroke-width="1.7"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span><b>小安 soc-agent</b><span>生产环境安全运维智能体</span></span>
+    </a>
+    <a class="repo" href="https://github.com/hughliat/soc-agent">github.com/hughliat/soc-agent</a>
+
+    <nav>
+      <div class="grp">文档</div>
+      <a href="index.html" aria-current="page">总览</a>
+      <a href="architecture.html">总体方案</a>
+      <a href="prd.html">产品需求（PRD）</a>
+      <a href="design.html">开发设计</a>
+      <div class="grp">参考</div>
+      <a href="../07-部署说明.html">部署说明</a>
+      <a href="../../README.md">README</a>
+    </nav>
+
+    <div class="meta">v1.1.0 · 2026-10<br>Node ≥ 18 · 麒麟 / Linux</div>
+  </aside>
+
+  <main class="main"><div class="wrap">
+
+    <div class="kicker">开源项目文档 · v1.1.0</div>
+    <h1>小安 soc-agent</h1>
+    <p class="lede">
+      部署在生产服务器上的<strong>安全运维智能体</strong>。运维用一句话描述现象，它自己读本机日志、匹配内置规则、
+      必要时联网核对报错含义，然后给出<strong>问题清单 · 根因 · 处置措施 · 验收方法</strong>。
+    </p>
+
+    <div class="box note">
+      <b>一句话说清它的边界</b>
+      它有 25 个只读工具，<em>没有任何命令执行能力</em>。不改配置、不重启服务、不写业务文件。
+      这不是"还没来得及做"，而是整份设计的前提——它决定了这个产品的安全定级、审计口径和界面形态。
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="n">25</div><div class="l">只读工具（23 自有 + 2 联网）</div></div>
+      <div class="stat"><div class="n">21</div><div class="l">内置故障模式</div></div>
+      <div class="stat"><div class="n">4</div><div class="l">层只读防线</div></div>
+      <div class="stat"><div class="n">8</div><div class="l">界面命令（原 63）</div></div>
+    </div>
+
+    <div class="cards">
+      <a class="card" href="architecture.html">
+        <div class="t">总体方案</div>
+        <div class="d">设计主张、分层架构、25 个工具怎么分工、四层防线为什么缺一不可、审计链怎么防篡改、三档部署形态。</div>
+      </a>
+      <a class="card" href="prd.html">
+        <div class="t">产品需求（PRD）</div>
+        <div class="d">要解决谁的什么问题、12 条功能需求的优先级与验收标准、非功能门槛、度量指标、明确不做什么。</div>
+      </a>
+      <a class="card" href="design.html">
+        <div class="t">开发设计</div>
+        <div class="d">模块职责、工具注册契约、8 个关键决策与踩坑记录、审计哈希链实现、测试与发布链路、技术债。</div>
+      </a>
+    </div>
+
+    <h2><span class="num">01</span>为什么"不给执行权"是产品能力，而不是缺陷</h2>
+
+    <p>
+      运维场景里，AI 助手最容易犯的错不是"答得不准"，而是<strong>答得不准还动手了</strong>。
+      生产环境上一次错误的 <code>systemctl restart</code> 或者一条误删的 <code>rm</code>，
+      代价远高于"我自己看着办"。所以这个产品把能力边界切在了一个非常具体的位置：
+    </p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:34%">它做</th><th>它不做</th></tr></thead>
+      <tbody><tr>
+        <td>
+          读本机日志（含轮转与 gzip）<br>
+          匹配 21 类故障模式，给措施与验收<br>
+          采集资源 / 进程 / 网络 / 服务 / 基线<br>
+          查 journal、查配置变更、算文件哈希<br>
+          联网核对报错含义（只发查询词）<br>
+          把报告发到白名单邮箱<br>
+          定时巡检：有故障告警，无故障日报
+        </td>
+        <td>
+          执行任何命令（无 bash / 无 shell）<br>
+          改配置、重启服务、杀进程<br>
+          写业务文件、上传下载<br>
+          派生子代理、装插件、连 MCP<br>
+          向任意地址发送内容<br>
+          回答与本机运维无关的问题
+        </td>
+      </tr></tbody>
+    </table></div>
+
+    <p>
+      代价是真实的：<strong>有些证据它拿不到</strong>。服务运行态、SMART、部分内核指标只能靠命令取得。
+      产品对此的处理不是"猜一把"，而是给一个采集脚本，让人跑完把输出贴回来：
+    </p>
+
+<pre><code><span class="c"># 纯只读，输出带 === SECTION: xxx === 分段，约 22 段</span>
+sh &lt;soc-agent 安装目录&gt;/bin/collect.sh &gt; evidence.txt</code></pre>
+
+    <p>
+      模型拿到贴回的文本后，只允许引用<em>真的出现了的段</em>；某段标 <code>[skipped: …]</code> 就按"该维度未覆盖"处理。
+      这条约束写进了身份提示词，也写进了 <code>knowledge/AGENTS.md</code> 的纪律层。
+    </p>
+
+    <h2><span class="num">02</span>一次诊断长什么样</h2>
+
+    <div class="steps">
+      <div class="s"><b>摸清现场</b><div class="d">不知道日志在哪 → <code>ls_logs</code> 拿日志地图；有大致方向 → 直接 <code>diagnose_logs</code>。</div></div>
+      <div class="s"><b>匹配规则</b><div class="d"><code>diagnose_logs</code> 扫最近改动过的日志，跑 21 类故障规则，返回带行号证据的问题清单。</div></div>
+      <div class="s"><b>补上下文</b><div class="d">命中后用 <code>read_log</code> 读出问题前后若干行，确认不是断章取义；路径必须来自 <code>ls_logs</code>，否则拒绝。</div></div>
+      <div class="s"><b>查标准手法</b><div class="d"><code>kb_lookup</code> 检索纪律层 / 专家层 / 技能层 / 速查 / 本机记忆五层知识库。</div></div>
+      <div class="s"><b>查外部知识</b><div class="d">报错代码不认识、怀疑已知缺陷 → <code>web_search</code> / <code>web_fetch</code>，只发查询词不发日志原文。</div></div>
+      <div class="s"><b>出结论</b><div class="d">按固定格式回答：一句话结论 → 问题清单（现象/证据/根因/措施/验收）→ 还需要什么。</div></div>
+      <div class="s"><b>落审计</b><div class="d">每一次工具调用都写进 <code>audit-YYYY-MM-DD.jsonl</code>，带 sha256 哈希链，事后可逐条校验。</div></div>
+    </div>
+
+    <h2><span class="num">03</span>三分钟跑起来</h2>
+
+    <p>它是 dsh 的插件，依赖顺序不能颠倒：<code>Node ≥ 18 → dsh → dsh-tui → soc-agent</code>。</p>
+
+<pre><code><span class="c"># 装到 dsh-tui profile（默认）</span>
+./install.sh dsh-tui
+
+<span class="c"># 配内网模型端点（OpenAI 兼容）</span>
+export SOC_LLM_BASE_URL="http://&lt;内网模型地址&gt;/v1"
+export SOC_LLM_API_KEY="&lt;key&gt;"
+
+<span class="c"># 自检 → 进界面</span>
+soc --check
+soc</code></pre>
+
+    <p>进去直接说人话：「这台服务器有什么问题」「磁盘满了怎么排查」「nginx 起不来帮我看看」「昨天发版之后就这样了」。</p>
+
+    <div class="box warn">
+      <b>内网部署别直接在线装</b>
+      在线安装要访问 npm 源拉依赖树（约 86 MB、上百个包），生产内网通常没有外网出口。
+      用 <code>tools/make-offline.sh</code> 在与目标同平台的机器上生成离线包，再 <code>./install-offline.sh</code>。
+      离线包含原生二进制，<strong>不能跨平台搬运</strong>。
+    </div>
+
+    <h2><span class="num">04</span>文档口径说明</h2>
+
+    <p>
+      这套 wiki 的全部数字与行为都来自<strong>代码本身</strong>，不是估算：工具数取自 <code>lib/index.js</code> 的
+      <code>ALLOWED_TOOLS</code>，故障模式取自 <code>src/core/diagnose.js</code> 的 <code>RULES</code>，
+      命令数取自补丁器写入的白名单。与旧文档有出入的地方（工具数 22 / 24 / 25 三种说法、单测条数）在
+      <a href="design.html#debt">开发设计 · 技术债</a>里逐条列出。
+    </p>
+
+    <div class="pager">
+      <a href="architecture.html"><div class="dir">下一篇 →</div><div class="nm">总体方案</div></a>
+      <a class="next" href="prd.html"><div class="dir">直接跳到 →</div><div class="nm">产品需求（PRD）</div></a>
+    </div>
+
+    <footer class="site">
+      小安 soc-agent v1.1.0 · <code>github.com/hughliat/soc-agent</code> · 本页离线可读，无外部依赖。
+    </footer>
+
+  </div></main>
+</div>
+</body>
+</html>

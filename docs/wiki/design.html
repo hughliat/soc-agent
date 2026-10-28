@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>开发设计 · 小安 soc-agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <a class="brand" href="index.html">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg4" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#1e6fd9"/><stop offset="1" stop-color="#14a38b"/>
+          </linearGradient>
+        </defs>
+        <rect width="34" height="34" rx="8" fill="url(#bg4)"/>
+        <path d="M17 7 L25 11 V18 C25 23 21 26 17 27.5 C13 26 9 23 9 18 V11 Z" fill="#fff"/>
+        <path d="M12 17.5 h2.4 l1.5-3.2 2.2 6.2 1.5-3 h2.4" stroke="#1e6fd9" stroke-width="1.7"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span><b>小安 soc-agent</b><span>生产环境安全运维智能体</span></span>
+    </a>
+    <a class="repo" href="https://github.com/hughliat/soc-agent">github.com/hughliat/soc-agent</a>
+
+    <nav>
+      <div class="grp">文档</div>
+      <a href="index.html">总览</a>
+      <a href="architecture.html">总体方案</a>
+      <a href="prd.html">产品需求（PRD）</a>
+      <a href="design.html" aria-current="page">开发设计</a>
+      <div class="grp">参考</div>
+      <a href="../07-部署说明.html">部署说明</a>
+      <a href="../../README.md">README</a>
+    </nav>
+
+    <div class="meta">v1.1.0 · 2026-10<br>Node ≥ 18 · 麒麟 / Linux</div>
+  </aside>
+
+  <main class="main"><div class="wrap">
+
+    <div class="kicker">开发设计</div>
+    <h1>约束在哪、代码就长在哪</h1>
+    <p class="lede">
+      这份文档给接手的人看：模块怎么切、工具怎么注册、八个关键决策当时踩了什么坑、
+      哪些地方看着奇怪但其实是对的、还有哪些坑没填。
+    </p>
+
+    <h2><span class="num">01</span>技术栈与选型</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:22%">选择</th><th style="width:26%">是什么</th><th>为什么不是别的</th></tr></thead>
+      <tbody>
+        <tr><td>Node ≥ 18，<code>dependencies: {}</code></td><td>运行时零第三方依赖</td><td>内网离线部署，依赖树越大越难搬；且 dsh 本身依赖 Node，Node 一定存在</td></tr>
+        <tr><td>宿主插件（非独立进程）</td><td>通过 <code>apply(ctx)</code> 注入 <code>tools / agents / systemPrompt</code></td><td>工具面收敛、提示词注入、审计钩子都必须发生在宿主的生命周期里，独立进程做不到</td></tr>
+        <tr><td>插件 ESM + 核心 CJS</td><td><code>lib/index.js</code> 是 ESM；<code>src/core/*</code> 是 CommonJS</td><td>插件入口由宿主以 ESM 加载；核心逻辑要能被单测与 CLI 用 <code>require</code> 直接调用</td></tr>
+        <tr><td>补丁器用 Node 而非 python</td><td><code>tools/patcher.mjs</code></td><td>麒麟最小化安装不保证有 python3；缺了会让界面封禁<strong>静默失效</strong></td></tr>
+        <tr><td>规则先算，模型后解释</td><td><code>src/core/diagnose.js</code> 纯函数</td><td>同一份日志任何人跑都得到同一批 findings；模型只能引用，不能编</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">02</span>模块职责</h2>
+
+<pre><code>lib/index.js               <span class="c">// 唯一持有权限的地方</span>
+                           <span class="c">// 工具注册 · 白名单 · 守卫 · 审计 · 提示词注入</span>
+src/core/
+  model.js                 <span class="c">// 统一事件模型（白名单字段，序列化时丢 raw）</span>
+  store.js                 <span class="c">// 只追加索引 + dedupKey 幂等</span>
+  analyze.js               <span class="c">// 归类 / 关联 / 聚合</span>
+  diagnose.js              <span class="c">// 21 类故障规则（纯函数，零副作用）</span>
+  logdiscover.js           <span class="c">// 日志发现 + 读取（白名单根 + 敏感路径拦截）</span>
+  system.js                <span class="c">// /proc / statfs / unit / 证书 只读采集</span>
+  secbaseline.js           <span class="c">// 安全基线五项检查</span>
+  kb.js                    <span class="c">// 五层知识库检索与记忆追加</span>
+  journal.js               <span class="c">// systemd journal（唯一子进程）</span>
+  mailer.js                <span class="c">// SMTP + 收件人白名单</span>
+  audit.js                 <span class="c">// sha256 哈希链（alg v1/v2）</span>
+  adapters/                <span class="c">// ansible / edr / db-readonly</span>
+bin/                       <span class="c">// soc / argus / preflight / collect / patrol / logmanage / ingest / install-timer</span>
+tools/                     <span class="c">// 补丁器 / 升级 / 打包 / 离线包 / 验收 / 品牌资源</span>
+knowledge/                 <span class="c">// 五层知识库</span>
+tests/run.js               <span class="c">// 79 条断言</span></code></pre>
+
+    <p>
+      切分原则只有一条：<strong>核心逻辑不认识模型、不持有权限</strong>。所以 <code>src/core/*</code> 全是可单测的纯函数，
+      权限与审计全部压在 <code>lib/index.js</code> 这一个文件里——安全只有一个收敛点，review 时不用满仓库找。
+    </p>
+
+    <h2><span class="num">03</span>工具注册契约</h2>
+
+    <p>每个工具是一个对象，四个字段缺一不可：<code>name</code> / <code>description</code> / <code>parameters</code> / <code>output</code> / <code>execute</code>。</p>
+
+<pre><code>ctx.tools.register({
+  name: 'read_log',
+  description: '读取指定日志文件的片段…路径必须来自 ls_logs 的结果。只读。',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,          <span class="c">// 硬约束：模型不能塞未声明参数</span>
+    required: ['path'],
+    properties: {
+      path:  { type: 'string',  description: '日志文件绝对路径（来自 ls_logs）' },
+      lines: { type: 'number',  description: '读最后多少行，默认 200、最大 2000' },
+      grep:  { type: 'string',  description: '只保留包含该关键字的行' },
+    },
+  },
+  output: {
+    schema: {
+      type: 'object',
+      additionalProperties: false,        <span class="c">// 输出多一个未声明字段 = 模型侧"工具坏了"</span>
+      required: ['path', 'lines', 'truncated'],
+      properties: { path: {...}, lines: {...}, truncated: {...}, note: {...} },
+    },
+    render(args, value) {               <span class="c">// 结构化结果 → 人可读的几行文本</span>
+      return [{ type: 'text', text: `${value.path}（返回 ${value.lines.length} 行）\n` + value.lines.join('\n') }];
+    },
+  },
+  async execute(args) {
+    return runQuery('read_log', args, (a) =&gt; { <span class="c">/* 真实逻辑 + 读日志 */</span> });
+  },
+});</code></pre>
+
+    <h3>四条硬约束</h3>
+    <ol>
+      <li><strong><code>parameters</code> 必须是标准 JSON Schema</strong>。运行时<em>不编译</em>，直接原样发给模型；用框架 DSL 形状会报 <code>type: null</code>。</li>
+      <li><strong><code>additionalProperties: false</code> 是双刃剑</strong>。它能挡住模型乱塞参数，也会把"我们想给模型的额外字段"判非法——见 <a href="#d4">D4</a>。</li>
+      <li><strong>所有执行都过 <code>runQuery()</code></strong>。它统一做两件事：写审计、把 <code>refs</code> 从返回值里剔除。</li>
+      <li><strong>失败要能说明原因</strong>。取不到数据时返回 <code>{ available: false, reason }</code>，而不是空数组——空数组会被模型当成"没问题"。</li>
+    </ol>
+
+    <h2><span class="num">04</span>八个关键决策</h2>
+
+    <h3 id="d1">D1 · 白名单必须打在 agent scope 上</h3>
+    <p>
+      <strong>现象</strong>：白名单写了，但模型仍然看得见 19 个工具（含 bash、写文件、子代理）。<br>
+      <strong>根因</strong>：<code>ctx.tools.restrict()</code> 强制要求 agent scope，插件 <code>apply</code> 的 ctx 是 plain context，
+      调用<strong>必然抛错</strong>；外层 <code>try/catch</code> 把错误吞了，于是 restrict 从未生效，而且没有任何报错。<br>
+      <strong>修法</strong>：监听 <code>agent/created</code> 取 <code>agent.ctx</code> 再 restrict；再用 <code>queueMicrotask</code> 回填"插件加载晚于 agent 创建"的情况。
+    </p>
+
+<pre><code>const onAgentCreated = (payload) =&gt; {
+  const agent = payload?.agent;
+  const agentCtx = agent?.ctx;                  <span class="c">// ← 必须是 agent 的 ctx</span>
+  if (!agentCtx?.tools) return;
+  const disposer = agentCtx.tools.restrict({ allow: ALLOWED_TOOLS });
+  restrictDisposers.add(disposer);
+};
+ctx.on?.('agent/created', onAgentCreated);
+queueMicrotask(backfillExistingAgents);         <span class="c">// 事件已错过的兜底</span></code></pre>
+
+    <p><strong>验证方式</strong>：探针 dump agent scope 的工具面。修复前 19 个，修复后精确等于 <code>ALLOWED_TOOLS</code> 的 25 个。</p>
+
+    <h3 id="d2">D2 · restrict 管不到 own-layer，所以还要 guard</h3>
+    <p>
+      <code>restrict</code> 按设计只过滤<strong>继承层</strong>（global + 祖先层），不动 scope 自己注册的工具。
+      dsh-tui 的 preset 会往 agent 自己层注册 <code>subagent</code>，所以 TUI 下模型可见 12 个（多一个）。<br>
+      <strong>修法</strong>：在 plain context 上注册 <code>ctx.tools.guard()</code>，单调、不可推翻，对所有工具调用生效。
+      实测拒绝信息：<code>soc-agent 只读策略：禁止调用工具「subagent」</code>。
+    </p>
+    <div class="box note">
+      <b>两层不是冗余</b>
+      restrict 管"看得见"，guard 管"调得动"。缺 restrict，工具面爆炸；缺 guard，own-layer 有缺口。两个都要。
+    </div>
+
+    <h3 id="d3">D3 · 参数用标准 JSON Schema，别用 DSL</h3>
+    <p><code>register()</code> 不编译 parameters，直接原样发给模型。用框架 DSL 形状会得到 <code>type: null</code>，模型侧表现为"工具没有参数"。</p>
+
+    <h3 id="d4">D4 · <code>refs</code> 必须剔除后再返回</h3>
+    <p>
+      审计要记"这次读了哪些证据"，所以工具内部会在返回值里塞 <code>refs</code>。
+      但 <code>output.schema</code> 是 <code>additionalProperties: false</code>，多一个未声明字段就会被判输出非法——
+      模型侧表现为"工具坏了"，整条诊断链失效（实测报 <code>value.refs is not a declared property</code>）。<br>
+      <strong>修法</strong>：<code>runQuery()</code> 统一解构剔除，审计拿得到、模型看不到。
+    </p>
+
+<pre><code>if (result &amp;&amp; typeof result === 'object' &amp;&amp; 'refs' in result) {
+  const { refs: _dropped, ...rest } = result;   <span class="c">// 审计已写，模型不该看到</span>
+  return rest;
+}</code></pre>
+
+    <h3 id="d5">D5 · 知识库路径不能用 <code>import.meta.url</code></h3>
+    <p>
+      dsh 的 loader 会把插件挂到 profile 的虚拟 URL（<code>…/profiles/&lt;name&gt;/#soc-agent</code>），
+      <code>new URL('../knowledge/', import.meta.url)</code> 算出来指向 profile，知识库直接找不到。<br>
+      <strong>修法</strong>：用 <code>require.resolve('../package.json')</code> 拿自己包的真实位置，再拼 <code>knowledge/</code>。
+    </p>
+
+    <h3 id="d6">D6 · 稳定序列化：v1 有漏洞，v2 才拦得住篡改</h3>
+    <p>
+      审计哈希原先用 <code>JSON.stringify(obj, Object.keys(obj).sort())</code>。那个"键名数组"是 <strong>replacer</strong>，
+      对所有层级生效：嵌套对象里不在顶层键名集合中的字段会被<strong>整体丢弃</strong>。<br>
+      后果很实在：篡改 <code>toolCalls</code> 里的工具参数、<code>referencedEventIds</code>、模型输出，hash <strong>完全不变</strong>，审计链形同虚设。
+    </p>
+<pre><code><span class="c">// v2：递归排序的全量序列化，任何字段改动都会改变 hash</span>
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(v).sort();
+  return '{' + keys.map((k) =&gt; JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}</code></pre>
+    <p>
+      每条记录带 <code>alg</code>（<code>v1</code> / <code>v2</code>），<code>verify()</code> 按记录自身版本重算：
+      旧记录用旧算法校验，历史链不会因算法升级集体"被篡改"。审计链一旦报假警，就再也没人信它。
+    </p>
+
+    <h3 id="d7">D7 · 审计写失败不能静默吞掉</h3>
+    <p>
+      "全程逐条可审计"是核心承诺。写审计失败时：查询结果照常返回（不阻断诊断），但必须
+      <code>ctx.logger.warn()</code> 明确告警——不能既不写也不说。
+    </p>
+
+    <h3 id="d8">D8 · 补丁器必须幂等且"逐项补缺"</h3>
+    <p>
+      早期的界面补丁脚本用"标记存在就跳过"。结果：后来新增的替换项<strong>永远不生效</strong>，而且看起来一切正常。
+      现在的规则是<strong>逐项检查补缺</strong>：每个锚点单独判定，能做就做，做不了报错非零退出。
+      同时每次改动先备份 <code>*.soc-agent-backup</code>，改完 <code>node --check</code> 校验语法，语法错自动回滚该文件。
+    </p>
+    <div class="box warn">
+      <b>补丁器要主动探测所有 dsh-tui 副本</b>
+      dsh 实际加载的是 <code>~/.dsh/profiles/*/node_modules/</code> 里那份，不是全局 nvm 那份。
+      只改全局等于没改——这个坑踩过，所以脚本会扫所有副本。
+    </div>
+
+    <h2><span class="num">05</span>数据模型</h2>
+
+    <h3>事件（<code>model.js</code>）</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:16%">字段</th><th style="width:22%">取值</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>id</code></td><td><code>evt-&lt;ms&gt;-&lt;seq&gt;</code></td><td>单进程内单调，不依赖随机，便于审计按 ID 排序</td></tr>
+        <tr><td><code>src</code></td><td>ansible / tianqing / onesec / custom</td><td>来源白名单，非法值降级</td></tr>
+        <tr><td><code>when</code></td><td>epoch ms</td><td>时区无关，展示时才本地化</td></tr>
+        <tr><td><code>where</code> / <code>what</code></td><td>字符串</td><td>必填，缺失直接拒绝建事件</td></tr>
+        <tr><td><code>result</code></td><td>ok / changed / failed / unreachable / alert / info / skip</td><td>枚举，非法降级</td></tr>
+        <tr><td><code>severity</code></td><td>info / low / medium / high / critical</td><td>有序，可比较</td></tr>
+        <tr><td><code>msg</code></td><td>≤ 500 字</td><td>超长截断，防提示词爆炸</td></tr>
+        <tr><td><code>raw</code></td><td>不落盘</td><td><code>serialize()</code> 主动丢弃，防敏感原文进审计</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>幂等</h3>
+    <p>
+      <code>dedupKey = f(src, where, when)</code>：同一份日志重跑不产生重复事件；对位置（路径/行）敏感，
+      所以同一时刻不同位置的事件不会被误合并。
+    </p>
+
+    <h3>审计记录</h3>
+<pre><code>{ ts, question, toolCalls: [{ tool, args, eventIds, at }],
+  referencedEventIds, note, prevHash, alg, hash }</code></pre>
+
+    <h2><span class="num">06</span>故障规则库</h2>
+
+    <p>21 条规则，(<code>src/core/diagnose.js</code>)。加一条故障类型 = 加一个 <code>RULES</code> 条目，不改逻辑。</p>
+
+<pre><code>{
+  key: 'disk-full',
+  label: '磁盘空间耗尽',
+  severity: 'critical',
+  category: 'storage',
+  re: /no space left on device|disk quota exceeded|ENOSPC/i,   <span class="c">// 单行正则</span>
+  remedy: [ 'df -h / df -i …', 'du 逐层定位 …', 'lsof +L1 查已删除未释放 …' ],
+  verify: 'df -h 目标分区回落到 85% 以下，且业务写入恢复',       <span class="c">// 修完怎么确认</span>
+}</code></pre>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:14%">级别</th><th>规则</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag crit">critical</span></td><td>磁盘空间耗尽 · inode 耗尽 · 内存不足/OOM · 磁盘 IO 错误/坏道 · RAID 降级</td></tr>
+        <tr><td><span class="tag high">high</span></td><td>服务启动失败 · 端口被占用 · 连接被拒 · 请求超时 · fd 耗尽 · 证书过期 · core dump · 数据库连接失败 · CPU 高负载 · 疑似端口扫描</td></tr>
+        <tr><td><span class="tag med">medium</span></td><td>认证失败/疑似爆破 · 权限不足 · DNS 解析失败 · 日志暴涨 · 时间漂移 · 慢查询</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>
+      规则命中给的是<strong>候选诊断</strong>，不是最终结论。模型可以结合联网资料补充或推翻，但必须引用 finding 的证据。
+      合并逻辑：不同文件命中同一 <code>key</code> 时合并计数并保留最多 5 条样本，排序按"级别 → 次数"。
+    </p>
+
+    <h2><span class="num">07</span>日志发现与读取的边界</h2>
+
+    <p>这是"只读"能否成立的关键模块（<code>logdiscover.js</code>）：</p>
+    <ul>
+      <li><strong>白名单根目录</strong>：只扫约定的日志目录，<code>extraRoots</code> 也必须是日志类目录。</li>
+      <li><strong>敏感路径拦截</strong>：命中敏感路径规则直接跳过（不返回给模型）。</li>
+      <li><strong>读必须可溯源</strong>：<code>read_log</code> 会重新跑一次发现，把传入路径与清单比对，不在清单内一律拒绝——
+        这是防任意文件读取的<strong>强制约束</strong>，不是建议。</li>
+      <li><strong>大文件不整读</strong>：只读尾部 N 行（默认 200、上限 2000），支持 gzip 轮转文件。</li>
+    </ul>
+
+    <h2><span class="num">08</span>巡检与邮件</h2>
+
+    <p><code>bin/patrol.js</code> 复用同一套规则与模板，<strong>不经过模型</strong>：定时任务不该依赖模型可用性。</p>
+    <ul>
+      <li>配置与模板首次运行自动生成：<code>patrol.json</code> + <code>daily.md.tpl</code> + <code>alert.md.tpl</code>。</li>
+      <li>模板只做单层占位符替换（<code>{{hostname}}</code> 等），不支持表达式——没有注入面。</li>
+      <li>邮件双门槛：<code>SOC_MAIL_ALLOWLIST</code>（不配 = 全拒）+ <code>patrol.json</code> 的 <code>recipients</code>。</li>
+      <li>日志压缩只压不删，默认只管自己的日志目录（<code>/var/log</code> 归 logrotate）。</li>
+    </ul>
+
+    <h2><span class="num">09</span>测试策略</h2>
+
+    <p><code>tests/run.js</code> 79 条断言，覆盖事件模型、store 幂等、分析聚合、审计链（含 v1/v2 与断链检测）、适配器、诊断规则、知识库、日志发现。</p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:26%">层次</th><th>怎么测</th><th style="width:24%">覆盖状态</th></tr></thead>
+      <tbody>
+        <tr><td>纯函数（core）</td><td>直接 <code>require</code> 调用，内存 sink 注入</td><td>覆盖充分</td></tr>
+        <tr><td>审计链</td><td>构造记录→篡改字段→断言 <code>verify()</code> 报断链</td><td>覆盖充分（含 v1 历史兼容）</td></tr>
+        <tr><td>适配器</td><td>用真实格式样本做夹具</td><td><strong>夹具未随包发布</strong>，交付包内 7 条失败</td></tr>
+        <tr><td>插件层（restrict / guard）</td><td>只能在真实宿主里用探针验证</td><td>无自动化用例，仅手工探针</td></tr>
+        <tr><td>端到端</td><td><code>tools/acceptance.sh</code> 六类检查 + <code>soc --check</code> 八项自检</td><td>覆盖交付形态</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">10</span>发布链路</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:30%">脚本</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td><code>tools/package.sh</code></td><td>打基础包（不含 node_modules 与备份文件）</td></tr>
+        <tr><td><code>tools/make-offline.sh</code></td><td>生成平台绑定的离线包（含依赖树 + 平台校验）</td></tr>
+        <tr><td><code>tools/make-full.sh</code></td><td>连同 dsh 全局包的整机包</td></tr>
+        <tr><td><code>tools/upgrade.sh</code></td><td>备份 → 升级 → <strong>强制重打补丁</strong> → 四项验证</td></tr>
+        <tr><td><code>tools/patch-dsh-tui.sh</code></td><td>界面收敛补丁（幂等，支持 <code>--check</code> / <code>--revert</code>）</td></tr>
+        <tr><td><code>tools/acceptance.sh</code></td><td>发布前六类检查（含安装包内容校验）</td></tr>
+        <tr><td><code>tools/check-docs.mjs</code></td><td>文档一致性检查</td></tr>
+        <tr><td><code>tools/make-logo.py</code></td><td>品牌资源生成（<strong>开发期脚本</strong>，不进运行时依赖链）</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="debt"><span class="num">11</span>已知技术债</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:6%">#</th><th style="width:30%">问题</th><th>说明与建议</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>单测夹具缺失</td><td>7 条 Ansible 用例读 <code>../dsh-ansible-logs/fixtures/*</code>，该目录未随包发布；交付包内 <code>node tests/run.js</code> 不会全绿。建议把夹具收进 <code>tests/fixtures/</code> 或缺失时显式 SKIP。</td></tr>
+        <tr><td>2</td><td>Windows 下无法直接跑全量单测</td><td>以文件路径 <code>import</code> 插件时触发 <code>ERR_UNSUPPORTED_ESM_URL_SCHEME</code>。Windows 仅供开发体验，生产在 Linux。</td></tr>
+        <tr><td>3</td><td>工具数口径曾有三处不一致</td><td>旧版 <code>package.json</code> 写 24、<code>dsh.plugin.json</code> 写 22、文档写 25。现统一为 <strong>25（23 自有 + 2 框架）</strong>，以 <code>ALLOWED_TOOLS</code> 为准。</td></tr>
+        <tr><td>4</td><td>知识库层数说法不一</td><td>README 称"7 库"，实际目录是 5 层（纪律/专家/技能/知识/记忆）。以 <code>kb_lookup</code> 的 <code>layer</code> 枚举为准。</td></tr>
+        <tr><td>5</td><td>天擎 / OneSEC 适配器未验真</td><td>标 <code>verified: false</code>，无真实样本；接入前需用真实导出校准字段。</td></tr>
+        <tr><td>6</td><td>大日志未压测</td><td>10 万行场景的性能与准确率未验证，目前靠行数上限兜底。</td></tr>
+        <tr><td>7</td><td>DB 只读连接器未接驱动</td><td>SELECT-only 拦截已就位，未连真库验证。</td></tr>
+        <tr><td>8</td><td>插件层无自动化测试</td><td>restrict / guard 的验证依赖宿主环境探针，回归靠手工。<code>soc --check</code> 只能间接兜住"补丁被打回原形"。</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="pager">
+      <a href="prd.html"><div class="dir">← 上一篇</div><div class="nm">产品需求（PRD）</div></a>
+      <a class="next" href="index.html"><div class="dir">回到 →</div><div class="nm">总览</div></a>
+    </div>
+
+    <footer class="site">
+      小安 soc-agent v1.1.0 · <code>github.com/hughliat/soc-agent</code> · 本页离线可读，无外部依赖。
+    </footer>
+
+  </div></main>
+</div>
+</body>
+</html>

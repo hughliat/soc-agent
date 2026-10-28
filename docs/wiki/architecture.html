@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>总体方案 · 小安 soc-agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <a class="brand" href="index.html">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#1e6fd9"/><stop offset="1" stop-color="#14a38b"/>
+          </linearGradient>
+        </defs>
+        <rect width="34" height="34" rx="8" fill="url(#bg2)"/>
+        <path d="M17 7 L25 11 V18 C25 23 21 26 17 27.5 C13 26 9 23 9 18 V11 Z" fill="#fff"/>
+        <path d="M12 17.5 h2.4 l1.5-3.2 2.2 6.2 1.5-3 h2.4" stroke="#1e6fd9" stroke-width="1.7"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span><b>小安 soc-agent</b><span>生产环境安全运维智能体</span></span>
+    </a>
+    <a class="repo" href="https://github.com/hughliat/soc-agent">github.com/hughliat/soc-agent</a>
+
+    <nav>
+      <div class="grp">文档</div>
+      <a href="index.html">总览</a>
+      <a href="architecture.html" aria-current="page">总体方案</a>
+      <a href="prd.html">产品需求（PRD）</a>
+      <a href="design.html">开发设计</a>
+      <div class="grp">参考</div>
+      <a href="../07-部署说明.html">部署说明</a>
+      <a href="../../README.md">README</a>
+    </nav>
+
+    <div class="meta">v1.1.0 · 2026-10<br>Node ≥ 18 · 麒麟 / Linux</div>
+  </aside>
+
+  <main class="main"><div class="wrap">
+
+    <div class="kicker">总体方案</div>
+    <h1>一个不许动手的智能体，怎么把运维的活干完</h1>
+    <p class="lede">
+      本方案回答四个问题：在什么约束下工作、靠什么保证"不会越界"、怎么让结论可信、出事之后怎么查。
+      其余细节（需求条目、模块实现）分别见 <a href="prd.html">PRD</a> 与 <a href="design.html">开发设计</a>。
+    </p>
+
+    <h2><span class="num">01</span>约束：这不只是一个技术选型问题</h2>
+
+    <p>产品的形态是被下面五条约束<strong>推</strong>出来的，不是先有想法再补理由：</p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:26%">约束</th><th>对设计的直接影响</th></tr></thead>
+      <tbody>
+        <tr><td>生产环境，故障代价高</td><td>宁可漏答不可错答：所有结论必须带证据（日志路径 + 行号 / 事件 ID），事实与推断必须分开写。</td></tr>
+        <tr><td>生产环境，等保合规口径</td><td>模型不能有执行面。审计必须可用于事后追责，因此需要<strong>防篡改</strong>的日志，而不只是"有日志"。</td></tr>
+        <tr><td>内网无外网出口</td><td>模型端点要可替换（OpenAI 兼容），升级/查版本这类"顺手联网"必须关掉；必须支持离线包部署。</td></tr>
+        <tr><td>麒麟最小化安装，没有 python3</td><td>安装与界面补丁链路全部用 Node 实现；脚本必须 dash 兼容（麒麟的 <code>/bin/sh</code> 就是 dash）。</td></tr>
+        <tr><td>使用者是值班运维，不是安全专家</td><td>界面只留必要入口；回答有固定格式；不确定时要说"还需要什么"，而不是长篇分析。</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">02</span>三条设计主张</h2>
+
+    <h3>主张一：安全靠白名单，不靠提示词</h3>
+    <p>
+      让模型"不要执行命令"写在提示词里是没用的——提示词可以被绕过、被注入、被模型自己忽略。
+      真正的约束必须落在<strong>工具面</strong>上：模型能看见哪些工具、能调用哪些工具，由运行时的
+      <code>restrict({allow})</code> 与 <code>guard()</code> 决定，与模型想不想无关。提示词只负责"让它在允许的范围里把话说明白"。
+    </p>
+
+    <h3>主张二：证据先于结论</h3>
+    <p>
+      每条结论必须能追溯到具体证据：日志文件 + 行号 + 原文摘录，或事件 ID。规则库里的每条故障模式都带
+      "识别特征 → 首查命令 → 常见根因 → 处置步骤 → 验收标准"五段，缺任何一段都不算一条合格规则。
+    </p>
+
+    <h3>主张三：能力要能被审计，而不只是被记录</h3>
+    <p>
+      审计日志谁都能改。所以每条审计记录带 <code>prevHash</code> 串成哈希链，改任何一条都会断链。
+      链上还带<strong>算法版本号</strong>，使得算法升级时历史链不会集体失效——审计链一旦报假警，就再也没人信它。
+    </p>
+
+    <h2><span class="num">03</span>分层架构</h2>
+
+    <div class="diagram">
+      <div class="layer">
+        <div class="lbl">模型</div>
+        <div class="body">
+          <div class="node blue"><b>内网模型端点</b><span>OpenAI 兼容 · SOC_LLM_BASE_URL</span></div>
+          <div class="node"><b>提示词两层</b><span>identity(order -1000) + workflow(order 100)</span></div>
+        </div>
+      </div>
+      <div class="arrow">↑ ↓ 工具调用 / 审计写入</div>
+      <div class="layer">
+        <div class="lbl">宿主</div>
+        <div class="body">
+          <div class="node"><b>dsh 运行时</b><span>plugins · tools · agents · systemPrompt</span></div>
+          <div class="node"><b>dsh-tui 界面</b><span>启动页 / 侧栏 / 命令表（被补丁收敛）</span></div>
+        </div>
+      </div>
+      <div class="arrow">↑ ↓ register / restrict / guard</div>
+      <div class="layer">
+        <div class="lbl">本产品</div>
+        <div class="body">
+          <div class="node teal"><b>lib/index.js</b><span>工具注册 · 白名单 · 守卫 · 审计</span></div>
+          <div class="node"><b>src/core/*</b><span>诊断规则 · 日志发现 · 基线 · 系统只读</span></div>
+          <div class="node"><b>knowledge/</b><span>五层知识库</span></div>
+        </div>
+      </div>
+      <div class="arrow">↑ 只读系统视图（/proc · /etc · journal · 日志文件）</div>
+      <div class="layer">
+        <div class="lbl">系统</div>
+        <div class="body">
+          <div class="node dark"><b>被诊断的主机</b><span>不改配置 · 不重启服务 · 不写业务文件</span></div>
+        </div>
+      </div>
+      <div class="arrow">↘ 只追加</div>
+      <div class="layer">
+        <div class="lbl">数据</div>
+        <div class="body">
+          <div class="node"><b>events/</b><span>只追加事件索引</span></div>
+          <div class="node"><b>audit/</b><span>hash 链 · 按天分文件 · 0600</span></div>
+          <div class="node"><b>config/ · logs/</b><span>巡检配置与输出</span></div>
+        </div>
+      </div>
+    </div>
+
+    <p>
+      四层里唯一"会做事"的是 <code>lib/index.js</code>：它注册工具、收窄工具面、拦住越权调用、写审计。
+      <code>src/core/*</code> 是纯函数库（读文件、算哈希、跑规则），不持有权限、不认识模型。
+      这个切分让"安全"有唯一的收敛点，也让核心逻辑可以脱离宿主单测。
+    </p>
+
+    <h2><span class="num">04</span>一次查询的全链路</h2>
+
+    <div class="steps">
+      <div class="s"><b>插件加载</b><div class="d"><code>apply(ctx)</code> 建数据目录（<code>0700</code>）、建 store 与 audit、注册 25 个工具、注入两段提示词。</div></div>
+      <div class="s"><b>收窄工具面</b><div class="d">等 <code>agent/created</code> 事件拿到 <code>agent.ctx</code>（真正的 agent scope），在其上 <code>restrict({allow})</code>；同时用微任务回填已存在的 agent。</div></div>
+      <div class="s"><b>执行拦截</b><div class="d"><code>ctx.tools.guard()</code> 在 plain context 上注册，对所有工具调用做单调校验：不在白名单直接返回拒绝理由。</div></div>
+      <div class="s"><b>工具执行</b><div class="d">工具内部只走文件读取（唯一例外 <code>journal_query</code> 用 <code>execFile</code> 数组传参 + 参数白名单）。</div></div>
+      <div class="s"><b>审计留痕</b><div class="d"><code>runQuery()</code> 统一包装：把证据引用（日志路径 / 事件 ID）写进审计，再从返回值里<strong>剔除</strong> <code>refs</code>，避免模型看到未声明的输出字段。</div></div>
+      <div class="s"><b>渲染与作答</b><div class="d">每个工具自带 <code>output.render()</code>，把结构化结果转成人可读的几行文本；模型基于这些文本按固定格式出结论。</div></div>
+    </div>
+
+    <div class="box warn">
+      <b>第 2 步是整个产品的命门</b>
+      <code>restrict</code> 强制要求 agent scope：在插件 <code>apply</code> 的 plain context 上调用<strong>必然抛错</strong>。
+      早期版本把这次调用包在 <code>try/catch</code> 里，错误被吞掉，于是白名单<strong>从未生效</strong>——
+      模型实际可见 19 个工具（含 bash、写文件、子代理）。修复方式与实测证据见
+      <a href="design.html#d1">开发设计 D1</a>。
+    </div>
+
+    <h2><span class="num">05</span>工具面：25 个工具怎么分工</h2>
+
+    <p>白名单来自 <code>lib/index.js</code> 的 <code>ALLOWED_TOOLS</code>，不多一个也不少一个：23 个自有 + 2 个框架自带的联网工具。</p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:22%">组</th><th style="width:14%">数量</th><th>工具与职责</th></tr></thead>
+      <tbody>
+        <tr><td>日志诊断（核心）</td><td>3</td><td><code>diagnose_logs</code> 首选入口 · <code>ls_logs</code> 日志地图 · <code>read_log</code> 读片段（路径必须在 ls_logs 清单内）</td></tr>
+        <tr><td>知识库</td><td>2</td><td><code>kb_lookup</code> 五层检索 · <code>kb_note</code> 沉淀记忆（只写 <code>memory/</code>，只追加）</td></tr>
+        <tr><td>资源与进程</td><td>3</td><td><code>sys_metrics</code> 负载/内存/磁盘/inode · <code>proc_list</code> TOP · <code>proc_detail</code> fd/limits/cgroup</td></tr>
+        <tr><td>网络与服务</td><td>2</td><td><code>net_status</code> TCP 状态与监听端口 · <code>svc_status</code> unit 与开机启用态</td></tr>
+        <tr><td>变更与完整性</td><td>4</td><td><code>recent_changes</code> 近 N 小时配置/包变更 · <code>pkg_history</code> · <code>file_hash</code> sha256 · <code>cert_check</code> 证书有效期</td></tr>
+        <tr><td>配置与基线</td><td>2</td><td><code>config_read</code> 白名单内配置（默认只给生效行） · <code>sec_baseline</code> 口令/SSH/sudo/暴露面/SUID</td></tr>
+        <tr><td>系统日志与出口</td><td>2</td><td><code>journal_query</code> systemd journal · <code>send_report</code> 邮件（收件人必须命中白名单）</td></tr>
+        <tr><td>多源事件</td><td>5</td><td><code>query_ansible</code> / <code>query_edr</code> / <code>query_all</code> / <code>correlate</code> / <code>explain_events</code></td></tr>
+        <tr><td>联网核对</td><td>2</td><td><code>web_search</code> / <code>web_fetch</code>（框架自带，只发查询词）</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>零子进程是硬指标</h3>
+    <p>
+      25 个工具里只有 <code>journal_query</code> 需要调外部程序（<code>journalctl</code>）。它用
+      <code>execFile</code> 数组传参、unit 名正则白名单（只允许字母数字与 <code>@ . _ : -</code>）、
+      并拒绝任何以 <code>-</code> 开头的值，杜绝参数注入。其余 24 个全部走文件读取——
+      从架构上就不存在命令注入面，因为根本没有命令。
+    </p>
+
+    <h2><span class="num">06</span>安全模型：四层防线，缺一不可</h2>
+
+    <p>四层不是"越多越保险"的堆叠，而是每层负责一个前一层管不到的面。实测结论：去掉任何一层都会漏。</p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:8%">层</th><th style="width:30%">机制</th><th>作用与不管什么</th></tr></thead>
+      <tbody>
+        <tr><td><b>1</b> 主</td><td><code>restrict({allow})</code>（agent scope）</td><td>把模型可见工具收敛到 25 个。按框架设计只过滤<strong>继承层</strong>，管不到 agent 自己层注册的工具。</td></tr>
+        <tr><td><b>2</b></td><td><code>guard()</code> 单调守卫（plain context）</td><td>管执行。own-layer 工具绕过 restrict，但绕不过 guard。实测拒绝信息：<code>soc-agent 只读策略：禁止调用工具「subagent」</code>。</td></tr>
+        <tr><td><b>3</b></td><td>沙箱锁死</td><td><code>mode: read-only</code> + <code>approval: never</code>；权限预设表只留 <code>soc-readonly</code>，<code>workspace-write</code> / <code>danger-full-access</code> 从表里删除。</td></tr>
+        <tr><td><b>4</b></td><td>插件禁用（cordis）</td><td>bash / pwsh / fs / fs-search / subagent 系 / workflow / goal / skill / plugin-manager / mcp 全部不加载。</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>界面也是攻击面</h3>
+    <p>
+      命令表、权限档位、更新检查这些"交互入口"，本质上都是<strong>能力入口</strong>：<code>/context</code> 会摊开系统提示词，
+      <code>/preset</code> 能切到带 bash 的模式，<code>/update</code> 会走 npm registry（外网出口）。
+      所以界面不是美化对象，而是安全边界的一部分：
+    </p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:26%">位置</th><th>处理</th></tr></thead>
+      <tbody>
+        <tr><td>命令表</td><td>63 → 8 个：<code>help / exit / quit / q / model / status / lang / theme</code></td></tr>
+        <tr><td>启动页入口</td><td>只返回「帮助」，摘掉会话与工作区、设置、有新版本、后台任务、投喂 Star</td></tr>
+        <tr><td>底部参数行</td><td>不渲染 preset / permission 两段（配置已钉死，显示只会误导）</td></tr>
+        <tr><td>权限档位</td><td>只剩 <code>soc-readonly</code>，Shift+Tab 没有别的档可切</td></tr>
+        <tr><td>更新检查</td><td><code>checkForTuiUpdate()</code> 直接返回空，不联网</td></tr>
+        <tr><td>品牌与文档入口</td><td>启动页与侧栏换成产品自有标识（含仓库地址），不暴露框架身份</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="box danger">
+      <b>升级会静默冲掉这些封禁</b>
+      dsh-tui 一升级，被改过的文件被整体替换，封禁<strong>失效但不报错</strong>。
+      所以升级必须走 <code>tools/upgrade.sh</code>（备份 → 升级 → 强制重打补丁 → 四项验证），
+      且启动自检把"补丁完整 + 命令数 = 8"列为<strong>阻断级</strong>检查项。
+    </div>
+
+    <h2><span class="num">07</span>审计：让"事后能查"变成"改不了"</h2>
+
+    <p>每次工具调用落一条记录到 <code>~/.dsh/soc-agent/audit/audit-YYYY-MM-DD.jsonl</code>，权限 <code>0600</code>，只追加。</p>
+
+<pre><code>{
+  "ts": 1761081600000,
+  "question": "[tool:diagnose_logs] {\"since_hours\":24}",
+  "toolCalls": [{ "tool": "diagnose_logs", "args": {...}, "eventIds": ["/var/log/nginx/error.log"], "at": 1761081600000 }],
+  "referencedEventIds": ["/var/log/nginx/error.log"],
+  "prevHash": "8f2c…a1",     <span class="c">// 上一条的 sha256，首条为 "genesis"</span>
+  "alg": "v2",               <span class="c">// 算法版本，verify 按记录自身版本重算</span>
+  "hash": "b73e…9f"
+}</code></pre>
+
+    <ul>
+      <li><strong>防篡改</strong>：改任何字段（含嵌套的 <code>toolCalls.args</code>、<code>referencedEventIds</code>）都会断链。</li>
+      <li><strong>跨天续链</strong>：新文件的第一条会回溯最近一个非空日的末条 hash，不会误报断链。</li>
+      <li><strong>算法可升级</strong>：每条自带 <code>alg</code>，历史链用旧算法校验，不因升级集体失效。</li>
+      <li><strong>写失败必须告警</strong>：审计写失败不阻断诊断，但会在日志里显式 warn——"全程可审计"是产品承诺，断了必须让人知道。</li>
+    </ul>
+
+    <h2><span class="num">08</span>知识库：五层，替代"把全文塞进提示词"</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:16%">层</th><th style="width:26%">目录/文件</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>纪律</td><td><code>knowledge/AGENTS.md</code></td><td>行为规范与红线（先查再答、事实/推断分离、收尾必给下一步）</td></tr>
+        <tr><td>专家</td><td><code>experts/linux-ops.md</code> · <code>network.md</code></td><td>按领域的排查经验</td></tr>
+        <tr><td>技能</td><td><code>skills/诊断操作手册.md</code></td><td>标准手法（先看什么、再看什么）</td></tr>
+        <tr><td>知识</td><td><code>kb/常见故障速查.md</code></td><td>速查表：症状 → 首查 → 处置</td></tr>
+        <tr><td>记忆</td><td><code>memory/本机基线.md</code></td><td>本机基线与历史诊断结论（部署后填一次，之后由 <code>kb_note</code> 追加）</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>
+      模型通过 <code>kb_lookup</code> 按需检索，不把全文背进提示词——提示词越长，模型越容易忽略真正的硬约束。
+      记忆层是唯一可写的层，且必须<strong>先征得用户同意</strong>才写，这既是纪律也是防止"自我强化错误结论"的设计。
+    </p>
+
+    <h2><span class="num">09</span>巡检：有故障告警，无故障也日报</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:26%">任务</th><th style="width:16%">频率</th><th>行为</th></tr></thead>
+      <tbody>
+        <tr><td><code>soc-patrol-alert</code></td><td>每 30 分钟</td><td>只在命中阈值以上故障时发信，健康时静默</td></tr>
+        <tr><td><code>soc-patrol-daily</code></td><td>每天 08:00</td><td>无论有无故障都发日报（可关）</td></tr>
+        <tr><td><code>soc-logmanage</code></td><td>每周日 03:30</td><td>压缩大日志（只压不删，可 gunzip 还原）</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>
+      巡检走 <code>bin/patrol.js</code>，复用同一套规则库与模板渲染，<strong>不经过模型</strong>——
+      定时任务不该依赖模型可用性。邮件出口有两道硬门槛：环境变量白名单
+      <code>SOC_MAIL_ALLOWLIST</code>（不配 = 全拒）+ <code>patrol.json</code> 的 <code>recipients</code> 必须同时命中。
+    </p>
+
+    <div class="box warn">
+      <b>systemd 用户级 timer 默认「登录才跑」</b>
+      服务器场景需 <code>sudo loginctl enable-linger &lt;用户&gt;</code>，否则巡检会<strong>静默停止</strong>。
+      启动自检会检查 linger 状态并给出警告。
+    </div>
+
+    <h2><span class="num">10</span>部署形态：三档，按目标机的网络情况选</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:24%">包</th><th style="width:14%">体积</th><th>适用场景</th></tr></thead>
+      <tbody>
+        <tr><td>基础包 <code>soc-agent-&lt;ver&gt;.tar.gz</code></td><td>约 1 MB</td><td>已装 dsh，且能访问 npm 源</td></tr>
+        <tr><td>离线包 <code>…-offline-&lt;os&gt;-&lt;arch&gt;</code></td><td>25–90 MB</td><td>已装 dsh，<strong>不能</strong>访问 npm 源（内网常态）</td></tr>
+        <tr><td>dsh 全局包</td><td>约 500 MB</td><td>目标机连 dsh 都没装（全新内网机器）</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>
+      离线包内含原生二进制（<code>@img/sharp-&lt;platform&gt;</code>、libvips 的 <code>.so</code>），
+      <strong>必须在与目标环境相同的 OS + 架构上生成</strong>；<code>install-offline.sh</code> 会先校验平台匹配，不匹配直接拒绝。
+    </p>
+
+    <div class="pager">
+      <a href="index.html"><div class="dir">← 上一篇</div><div class="nm">总览</div></a>
+      <a class="next" href="prd.html"><div class="dir">下一篇 →</div><div class="nm">产品需求（PRD）</div></a>
+    </div>
+
+    <footer class="site">
+      小安 soc-agent v1.1.0 · <code>github.com/hughliat/soc-agent</code> · 本页离线可读，无外部依赖。
+    </footer>
+
+  </div></main>
+</div>
+</body>
+</html>

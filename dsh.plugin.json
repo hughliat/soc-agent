@@ -1,0 +1,23 @@
+{
+  "name": "soc-agent",
+  "description": "小安（soc-agent）· 生产环境安全运维智能体（github.com/hughliat/soc-agent）：25 个只读工具 + 定时巡检 + 日报",
+  "version": "1.1.0",
+  "entry": {
+    "name": "soc-agent",
+    "inject": [
+      "tools"
+    ]
+  },
+  "files": [
+    "lib",
+    "src",
+    "bin",
+    "knowledge",
+    "tools",
+    "docs",
+    "dsh.plugin.json",
+    "cordis.patch.yml",
+    "README.md",
+    "install.sh"
+  ]
+}

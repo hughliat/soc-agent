@@ -1,0 +1,45 @@
+{
+  "name": "soc-agent",
+  "version": "1.1.0",
+  "private": true,
+  "description": "小安（soc-agent）· 生产环境安全运维智能体（github.com/hughliat/soc-agent）：25 个只读工具 + 定时巡检 + 日报",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "bin",
+    "knowledge",
+    "tools",
+    "docs",
+    "assets",
+    "dsh.plugin.json",
+    "cordis.patch.yml",
+    "README.md",
+    "install.sh"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": "0.2.0-rc.2"
+    }
+  },
+  "scripts": {
+    "test": "node tests/run.js"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hughliat/soc-agent.git"
+  }
+}

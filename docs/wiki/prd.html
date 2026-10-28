@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>产品需求（PRD）· 小安 soc-agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <a class="brand" href="index.html">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg3" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#1e6fd9"/><stop offset="1" stop-color="#14a38b"/>
+          </linearGradient>
+        </defs>
+        <rect width="34" height="34" rx="8" fill="url(#bg3)"/>
+        <path d="M17 7 L25 11 V18 C25 23 21 26 17 27.5 C13 26 9 23 9 18 V11 Z" fill="#fff"/>
+        <path d="M12 17.5 h2.4 l1.5-3.2 2.2 6.2 1.5-3 h2.4" stroke="#1e6fd9" stroke-width="1.7"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span><b>小安 soc-agent</b><span>生产环境安全运维智能体</span></span>
+    </a>
+    <a class="repo" href="https://github.com/hughliat/soc-agent">github.com/hughliat/soc-agent</a>
+
+    <nav>
+      <div class="grp">文档</div>
+      <a href="index.html">总览</a>
+      <a href="architecture.html">总体方案</a>
+      <a href="prd.html" aria-current="page">产品需求（PRD）</a>
+      <a href="design.html">开发设计</a>
+      <div class="grp">参考</div>
+      <a href="../07-部署说明.html">部署说明</a>
+      <a href="../../README.md">README</a>
+    </nav>
+
+    <div class="meta">v1.1.0 · 2026-10<br>Node ≥ 18 · 麒麟 / Linux</div>
+  </aside>
+
+  <main class="main"><div class="wrap">
+
+    <div class="kicker">产品需求文档 · PRD v1.1</div>
+    <h1>把"服务器有问题"变成一份能照着做的处置单</h1>
+    <p class="lede">
+      本文定义产品的用户、场景、功能需求与验收口径。所有需求均可在当前代码中找到落点；
+      未落地或部分落地的项，统一记在 <a href="#risk">风险与未决项</a>。
+    </p>
+
+    <div class="tw"><table>
+      <tbody>
+        <tr><th style="width:18%">文档版本</th><td>PRD v1.1（对应产品 v1.1.0）</td></tr>
+        <tr><th>状态</th><td>已实现，生产内网可用（模型端点待切内网）</td></tr>
+        <tr><th>形态</th><td>终端交互（TUI）+ 定时巡检；插件形态部署于 dsh / dsh-tui</td></tr>
+        <tr><th>适用平台</th><td>麒麟 V10 / 主流 Linux（Windows 仅开发体验）</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">01</span>背景与问题</h2>
+
+    <p>生产环境的故障处置，卡点很少在"没有日志"，而在下面三件事：</p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:24%">卡点</th><th style="width:38%">现在的做法</th><th>后果</th></tr></thead>
+      <tbody>
+        <tr><td>不知道看哪</td><td>凭经验翻 <code>/var/log</code>，一个个 <code>tail</code></td><td>定位时间全花在"找"上，不在"判断"上</td></tr>
+        <tr><td>看懂了但不敢下结论</td><td>把报错粘到搜索引擎，翻几页帖子</td><td>结论依赖个人经验，交接时无法复现</td></tr>
+        <tr><td>知道要改但不敢改</td><td>问同事、等审批</td><td>处置动作没有验收标准，改完不知道算不算修好</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>
+      同时，通用 AI 助手在生产环境里"不敢用"的原因很具体：<strong>它能执行命令</strong>。
+      一次错误的 <code>restart</code> 或误删，代价远超它省下的时间。所以本产品的切入点是把能力切在
+      "读全、给方案、不动手"这条线上——用<strong>可审计的只读能力</strong>换<strong>敢在生产用的授权</strong>。
+    </p>
+
+    <h2><span class="num">02</span>目标与非目标</h2>
+
+    <h3>目标（可验证）</h3>
+    <ul>
+      <li>运维一句话描述现象，<strong>一次交互内</strong>拿到带证据的问题清单（不是"建议排查一下"）。</li>
+      <li>每条问题带<strong>处置措施 + 验收标准</strong>，人能照着做、做完能自证。</li>
+      <li>产品的全部能力<strong>可审计到每一次工具调用</strong>，且审计不可静默篡改。</li>
+      <li>在无外网、无 python3、dash 为 <code>/bin/sh</code> 的信创环境里<strong>装得上、跑得起来</strong>。</li>
+    </ul>
+
+    <h3>非目标（明确不做）</h3>
+    <ul>
+      <li><strong>不自动修复</strong>。没有执行面，是产品定义而非排期问题。</li>
+      <li><strong>不做通用问答</strong>。写代码、翻译、闲聊、时政、投资建议一律拒绝并引回正题。</li>
+      <li><strong>不做集中式 SOC 平台</strong>。它是单机诊断助手，多源事件只做已入库数据的关联。</li>
+      <li><strong>不替代监控系统</strong>。巡检是兜底与日报，不是指标采集与告警平台。</li>
+      <li><strong>不做模型微调</strong>。换模型只换端点，不换行为契约。</li>
+    </ul>
+
+    <h2><span class="num">03</span>用户与场景</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:20%">角色</th><th style="width:28%">场景</th><th>他真正想要的</th></tr></thead>
+      <tbody>
+        <tr><td>值班运维</td><td>告警响了，登录机器，不知道从哪看</td><td>一条命令给出"最要紧的是什么 + 先做什么"</td></tr>
+        <tr><td>系统管理员</td><td>发版后服务异常，怀疑是变更</td><td>近 N 小时改了什么、包升级了没、配置被谁动过</td></tr>
+        <tr><td>安全运营</td><td>月度自查 / 等保整改</td><td>基线偏差清单（口令、SSH、sudo、暴露面、SUID）+ 处置建议</td></tr>
+        <tr><td>交接与审计</td><td>换班、事后复盘、监管检查</td><td>谁在什么时候查了什么、拿到什么证据，且这份记录改不了</td></tr>
+        <tr><td>值班主管</td><td>每天早上想知道"昨天有没有事"</td><td>一封日报：扫了哪些日志、有没有问题、最严重的是哪条</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">04</span>功能需求</h2>
+
+    <p>
+      优先级：<span class="tag p0">P0</span> 没有它产品不成立 ·
+      <span class="tag p1">P1</span> 生产可用必需 ·
+      <span class="tag p2">P2</span> 增强项
+    </p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:9%">ID</th><th style="width:26%">需求</th><th style="width:8%">优先级</th><th>验收标准（可测）</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>FR-01</td><td>日志地图：列出本机可读日志（路径/大小/mtime/类别）</td><td><span class="tag p0">P0</span></td>
+          <td>不传参返回全部可读日志；模型不再需要猜路径（提示词与工具描述均要求"先 ls_logs"）</td>
+        </tr>
+        <tr>
+          <td>FR-02</td><td>自动诊断：扫日志 + 匹配 21 类故障 + 给措施与验收</td><td><span class="tag p0">P0</span></td>
+          <td>单次调用返回 <code>summary</code> / <code>findings</code> / <code>scannedFiles</code> / <code>scannedLines</code>；每条 finding 含级别、计数、样本行号、措施、验收</td>
+        </tr>
+        <tr>
+          <td>FR-03</td><td>精读日志片段（支持 gzip、关键字过滤）</td><td><span class="tag p0">P0</span></td>
+          <td>传入不在 <code>ls_logs</code> 清单内的路径必须拒绝并说明原因（防任意文件读取）</td>
+        </tr>
+        <tr>
+          <td>FR-04</td><td>资源与进程只读采集：负载/内存/磁盘/inode/D 状态进程、进程 TOP 与详情</td><td><span class="tag p0">P0</span></td>
+          <td>Linux 上直接读 <code>/proc</code> 与 <code>statfs</code>，不调 <code>df/free/ps</code>；取不到时返回原因而非空值</td>
+        </tr>
+        <tr>
+          <td>FR-05</td><td>网络与服务状态：TCP 状态分布、监听端口、对外暴露标记、unit 启用态</td><td><span class="tag p1">P1</span></td>
+          <td>读 <code>/proc/net/tcp</code> 与 unit 文件；明确标注"这反映配置为启用，运行态要看 journal"</td>
+        </tr>
+        <tr>
+          <td>FR-06</td><td>变更追溯：近 N 小时配置变更、包变更史、文件 sha256</td><td><span class="tag p0">P0</span></td>
+          <td>可回答"是不是刚改坏了"；哈希与基线比对可判断内容是否被改（mtime 可伪造）</td>
+        </tr>
+        <tr>
+          <td>FR-07</td><td>安全基线：口令策略 / SSH / sudo / 暴露面 / SUID</td><td><span class="tag p1">P1</span></td>
+          <td>返回 <code>findings</code>（含级别、说明、证据、建议）与 <code>checked</code> 检查项清单；纯读</td>
+        </tr>
+        <tr>
+          <td>FR-08</td><td>配置读取：仅白名单路径，默认只给生效行</td><td><span class="tag p1">P1</span></td>
+          <td>非白名单路径一律拒绝并给提示；支持 <code>grep</code> 与行数上限</td>
+        </tr>
+        <tr>
+          <td>FR-09</td><td>证书检查：有效期与签发信息</td><td><span class="tag p2">P2</span></td>
+          <td>剩余 30 天内必须提醒；TLS 握手失败可直接归因</td>
+        </tr>
+        <tr>
+          <td>FR-10</td><td>systemd journal 查询（按 unit / 时间 / 级别）</td><td><span class="tag p1">P1</span></td>
+          <td>唯一允许的子进程；unit 名正则白名单，拒绝 <code>-</code> 开头的参数；macOS 明确报"不适用"</td>
+        </tr>
+        <tr>
+          <td>FR-11</td><td>知识库检索与经验沉淀（五层）</td><td><span class="tag p0">P0</span></td>
+          <td><code>kb_lookup</code> 可限定层与条数；<code>kb_note</code> 只能写 <code>memory/</code>，只追加，且必须先征得用户同意</td>
+        </tr>
+        <tr>
+          <td>FR-12</td><td>诊断报告邮件外发</td><td><span class="tag p1">P1</span></td>
+          <td>收件人必须命中白名单；<strong>未配置白名单时一律拒绝</strong>；只发正文不发附件</td>
+        </tr>
+        <tr>
+          <td>FR-13</td><td>多源事件关联（Ansible / 天擎 / OneSEC）</td><td><span class="tag p2">P2</span></td>
+          <td>跨源时间线 + 关联规则（变更后异常 / 同因多发 / 监控盲区），结论带事件 ID 证据</td>
+        </tr>
+        <tr>
+          <td>FR-14</td><td>联网核对报错含义</td><td><span class="tag p1">P1</span></td>
+          <td>只发查询词，不发日志原文；内网无出口时应失败并降级为"本地推断"而非编造</td>
+        </tr>
+        <tr>
+          <td>FR-15</td><td>定时巡检与日报</td><td><span class="tag p1">P1</span></td>
+          <td>告警任务仅在命中阈值以上故障时发信；日报每天固定时间；<strong>不经过模型</strong>；邮件白名单双门槛</td>
+        </tr>
+        <tr>
+          <td>FR-16</td><td>界面收敛与品牌</td><td><span class="tag p0">P0</span></td>
+          <td>命令表 8 个；启动页只留帮助；参数行只显示 model/effort；不联网查版本；侧栏与启动页为产品自有标识</td>
+        </tr>
+        <tr>
+          <td>FR-17</td><td>审计哈希链</td><td><span class="tag p0">P0</span></td>
+          <td>每次工具调用一条记录；改任一字段 <code>verify()</code> 必须报断链；跨天续链不误报</td>
+        </tr>
+        <tr>
+          <td>FR-18</td><td>启动自检（8 项）</td><td><span class="tag p0">P0</span></td>
+          <td>Node 版本、profile 与插件、权限表锁死、沙箱 read-only、界面补丁 + 命令数、审计目录可写、API Key 为阻断级；巡检/linger 为警告级</td>
+        </tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">05</span>非功能需求</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:20%">维度</th><th>要求</th><th style="width:26%">落地方式</th></tr></thead>
+      <tbody>
+        <tr><td>访问控制</td><td>模型侧不存在任何写/执行工具；白名单外调用必须被拒</td><td><code>restrict</code> + <code>guard</code> + 沙箱 + 插件禁用（四层）</td></tr>
+        <tr><td>安全审计</td><td>工具调用全量留痕，可校验完整性，保留期由运维决定</td><td>按天分文件 JSONL + sha256 链 + 算法版本</td></tr>
+        <tr><td>数据完整性</td><td>审计目录不可被模型写入；文件权限 0600 / 目录 0700</td><td>数据目录与工具白名单分离，模型无 fs 工具</td></tr>
+        <tr><td>入侵防范</td><td>无命令注入面；唯一子进程参数不可控</td><td>24 个工具零子进程；<code>journalctl</code> 用 <code>execFile</code> + 参数白名单</td></tr>
+        <tr><td>兼容性</td><td>麒麟 V10 / glibc ≥ 2.17 / dash / 无 python3 / Node ≥ 18</td><td>安装与补丁链全 Node 实现；脚本过 <code>dash -n</code>；验收脚本专项检查</td></tr>
+        <tr><td>可离线</td><td>内网无外网可完整部署</td><td>离线包 + <code>install-offline.sh</code> + 平台校验；关掉更新检查</td></tr>
+        <tr><td>性能</td><td>单次诊断在"15 文件 × 300 行"量级内秒级返回；日志读取有上限</td><td>读取行数上限 2000、文件数上限 40、返回条数上限 200</td></tr>
+        <tr><td>可维护</td><td>零第三方运行时依赖；单测覆盖核心逻辑</td><td><code>dependencies: {}</code>；<code>tests/run.js</code> 断言 79 条</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">06</span>交互与信息架构</h2>
+
+    <h3>可用命令（8 个，其余已从命令表移除）</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:26%">命令</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>/help</code> <code>/status</code></td><td>看能用什么 / 看当前会话状态</td></tr>
+        <tr><td><code>/model</code></td><td>切换模型（内网多端点时）</td></tr>
+        <tr><td><code>/lang</code> <code>/theme</code></td><td>切换语言 / 主题</td></tr>
+        <tr><td><code>/exit</code> <code>/quit</code> <code>/q</code></td><td>退出</td></tr>
+      </tbody>
+    </table></div>
+    <p>被移除的包括 <code>/context</code>（会摊开系统提示词）、<code>/plugins</code>、<code>/mcp</code>、<code>/hooks</code>、<code>/provider</code>、<code>/update</code>、<code>/workspace</code> 等。</p>
+
+    <h3>回答必须长成这样</h3>
+<pre><code>一句话结论：这台机器当前最要紧的问题是什么
+
+问题清单（按严重度排序）
+  - 现象：一句话
+  - 证据：日志路径 + 行号 + 原文摘录（1–3 行，不贴整段）
+  - 根因：事实 / 推断（推断要写依据）/ 资料（来源）
+  - 措施：编号步骤，带具体命令
+  - 验收：怎么确认修好了
+
+还要什么：信息不足时，明确列出需要用户提供什么</code></pre>
+
+    <p>约束：一次最多 5 条问题，其余一句话归纳；扫完没问题就直接说"没发现已知故障模式"，并说明扫了哪些、哪些维度没覆盖。</p>
+
+    <h2><span class="num">07</span>度量指标</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:30%">指标</th><th style="width:26%">口径</th><th>目标</th></tr></thead>
+      <tbody>
+        <tr><td>定位时长</td><td>从提问到拿到"最要紧那条"的时间</td><td>较人工翻日志明显下降（以值班记录对比）</td></tr>
+        <tr><td>结论可执行率</td><td>给出的措施中，人能直接照做的比例</td><td>≥ 90%（"建议排查一下"不计入）</td></tr>
+        <tr><td>证据完整率</td><td>带路径+行号或事件 ID 的结论占比</td><td>100%（纪律层硬要求）</td></tr>
+        <tr><td>规则误报率</td><td>被人工判定为误报的 finding 占比</td><td>持续跟踪，按规则逐条调阈值</td></tr>
+        <tr><td>审计链完整率</td><td><code>verify()</code> 通过的天数占比</td><td>100%</td></tr>
+        <tr><td>巡检到达率</td><td>定时任务实际执行次数 / 应执行次数</td><td>≥ 99%（受 linger 影响，需自检兜底）</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2><span class="num">08</span>发布与验收</h2>
+
+    <p>发布前必须通过 <code>tools/acceptance.sh</code> 的六类检查，全部通过才算可交付：</p>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:24%">类别</th><th>检查内容</th></tr></thead>
+      <tbody>
+        <tr><td>运行时依赖</td><td>Node ≥ 18；<strong>安装链路不依赖 python3</strong>；tar / gzip 可用</td></tr>
+        <tr><td>Shell 兼容</td><td>全部脚本过 dash 语法检查；无 bash 专有语法；无 BSD 专属 <code>sed -i ''</code></td></tr>
+        <tr><td>命名残留</td><td>无历史项目名残留</td></tr>
+        <tr><td>文件权限</td><td><code>install.sh</code> 与 <code>bin/</code> 下脚本具执行位</td></tr>
+        <tr><td>单元测试</td><td>全部断言通过</td></tr>
+        <tr><td>安装包</td><td>可解压、目录完整、<code>bin/soc</code> 保留执行位、无 node_modules 与备份文件</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>上线前的人工确认项：<code>soc --check</code> 八项全绿、真实故障复现一次、审计 <code>verify()</code> 通过、定时任务收到一次真实邮件。</p>
+
+    <h2 id="risk"><span class="num">09</span>风险与未决项</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th style="width:30%">项</th><th style="width:12%">状态</th><th>影响与应对</th></tr></thead>
+      <tbody>
+        <tr><td>内网模型端点未定</td><td><span class="tag crit">高</span></td><td>当前用云端 key 联调，交付前必须切内网并全量复测；否则合规不成立</td></tr>
+        <tr><td>天擎 / OneSEC 适配器无真实样本</td><td><span class="tag high">中</span></td><td>适配器标 <code>verified: false</code>；接入前需用真实导出重新校准字段映射</td></tr>
+        <tr><td>10 万行日志压测未做</td><td><span class="tag high">中</span></td><td>当前按行数上限截断；大日志场景的性能与准确率均未验证</td></tr>
+        <tr><td>数据库只读连接器未接真实驱动</td><td><span class="tag high">中</span></td><td>SELECT-only 拦截已就位，但未连真库验证</td></tr>
+        <tr><td>框架内建 71 个 slash 命令</td><td><span class="tag med">低</span></td><td>属 UI 内建，插件层关不掉；有风险的三个入口对应插件已被禁用</td></tr>
+        <tr><td>单测夹具缺失</td><td><span class="tag high">中</span></td><td>7 条 Ansible 用例依赖未随包发布的 <code>dsh-ansible-logs/fixtures</code>，交付包内跑不全绿，见 <a href="design.html#debt">技术债</a></td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="pager">
+      <a href="architecture.html"><div class="dir">← 上一篇</div><div class="nm">总体方案</div></a>
+      <a class="next" href="design.html"><div class="dir">下一篇 →</div><div class="nm">开发设计</div></a>
+    </div>
+
+    <footer class="site">
+      小安 soc-agent v1.1.0 · <code>github.com/hughliat/soc-agent</code> · 本页离线可读，无外部依赖。
+    </footer>
+
+  </div></main>
+</div>
+</body>
+</html>

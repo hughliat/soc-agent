@@ -1,0 +1,22 @@
+PLAY [加固 Web 层] ****
+
+TASK [Gathering Facts] ***
+ok: [web-01]
+ok: [web-02]
+ok: [web-03]
+
+TASK [校验上游变量] ***
+changed: [web-01]
+failed: [web-01] => {"changed": false, "msg": "The task includes an option with an undefined variable. The error was: 'upstream_backends' is undefined"}
+failed: [web-02] => {"changed": false, "msg": "The task includes an option with an undefined variable. The error was: 'upstream_backends' is undefined"}
+failed: [web-03] => {"changed": false, "msg": "The task includes an option with an undefined variable. The error was: 'upstream_backends' is undefined"}
+
+TASK [重启 nginx] ***
+failed: [db-01] => {"changed": false, "msg": "Job for nginx.service failed because the control process exited with error code."}
+fatal: [db-01]: UNREACHABLE! => {"changed": false, "unreachable": true, "msg": "Failed to connect to the host via ssh: Connection timed out during banner exchange"}
+
+PLAY RECAP ***
+web-01 : ok=3 changed=1 unreachable=0 failed=1 skipped=0
+web-02 : ok=2 changed=0 unreachable=0 failed=1 skipped=0
+web-03 : ok=2 changed=0 unreachable=0 failed=1 skipped=0
+db-01 : ok=1 changed=0 unreachable=1 failed=1 skipped=0

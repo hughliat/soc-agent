@@ -1,0 +1,41 @@
+#!/bin/sh
+# Argus 启动入口（soc 是兼容旧写法的别名） —— 先自检，通过才进 TUI。
+#
+# 为什么不直接改 dst：
+#   dst 是 dsh-tui 的 bin，升级会被覆盖。用独立入口包装，升级不受影响，
+#   且自检逻辑只在一处维护。
+#
+# 用法：
+#   soc                 # 自检 + 进入交互界面（等同 dst）
+#   soc --skip-check    # 跳过自检（应急用，会二次确认）
+#   soc --check         # 只自检，不进界面
+set -u
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROFILE="${SOC_PROFILE:-dsh-tui}"
+
+# ── 只自检 ──
+if [ "${1:-}" = "--check" ]; then
+  exec sh "$HERE/preflight.sh"
+fi
+
+# ── 跳过自检（应急）──
+if [ "${1:-}" = "--skip-check" ]; then
+  printf '\033[33m警告：已跳过启动自检。\033[0m\n'
+  printf '跳过自检意味着不检查权限锁、补丁完整性与模型配置，\n'
+  printf '可能带着失效的安全配置进入界面。继续请输入 yes：'
+  read -r answer
+  [ "$answer" = "yes" ] || { echo "已取消。"; exit 1; }
+  shift
+  exec dsh --profile "$PROFILE" "$@"
+fi
+
+# ── 正常路径：自检 → 启动 ──
+if ! sh "$HERE/preflight.sh"; then
+  printf '\033[31m拒绝进入交互界面。\033[0m\n'
+  printf '  仅查看自检：soc --check\n'
+  printf '  应急跳过：  soc --skip-check\n\n'
+  exit 1
+fi
+
+exec dsh --profile "$PROFILE" "$@"

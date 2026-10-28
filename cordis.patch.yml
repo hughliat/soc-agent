@@ -1,0 +1,72 @@
+# soc-agent 服务端插件挂载（Host 端）
+#
+# 2026-10-21 定位调整：从「只读外部日志查询器」→「本机服务器故障诊断助手」。
+#   用户明确要求：分析本机各种日志 + 联网查原因 + 给出问题及解决措施。
+#   因此 web 能力（web_search / web_fetch）**重新放开** —— 查报错含义、已知缺陷、
+#   官方处置建议是诊断刚需。
+#
+# 安全边界（不变）：
+#   · 禁执行：tool-bash / tool-pwsh（不让模型跑命令）
+#   · 禁写入：tool-fs / tool-fs-search（诊断不需要写文件）
+#   · 禁派生：subagent / workflow / goal（可绕过父白名单）
+#   · 禁装包：plugin-manager（能往 profile 装任意 npm 包）
+#   · 禁 MCP：mcp-resources（可连任意外部服务）
+#   · 只诊断、只出方案，**不动手修**
+#
+# 主防线仍是「按 agent 的工具白名单」（lib/index.js 的 agent/created → restrict）。
+# 这里的 disabled 是纵深冗余。
+- insert:
+    - id: soc-agent
+      name: soc-agent
+
+# ── 执行（禁止）──
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+
+# ── 文件写入（禁止；读日志走插件自己的只读工具）──
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+
+# ── 派生子代理 / 编排（可绕过父白名单）──
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-ralph
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-jobs
+  disabled: true
+
+# ── 技能加载（skill 文件内容可含任意指令＝间接扩权；本产品用内置知识库替代）──
+- id: tool-skill
+  disabled: true
+
+# ── 装包入口（能往 profile 装任意 npm 包）──
+- id: tool-plugin-manager
+  disabled: true
+
+# ── MCP 客户端（可连任意外部 MCP server）──
+- id: mcp-resources
+  disabled: true
+
+# ── 联网查因（2026-10-21 放开）──
+# 注意：web 服务族必须一起启用，否则 tool-web 会 waiting for web。
+# dsh 的匿名 fetch 只允许公网 HTTP(S) 目标并逐跳校验，天然防 SSRF。
+- id: web
+  config:
+    searchProvider: deepseek-official
+    fetchProvider: http
